@@ -3,6 +3,7 @@
 #include "credentials.h"
 #include <ESPRandom.h>
 #include <ArduinoHttpClient.h>
+#include <ArduinoJson.h>
 
 class WIFIMQTTClient
 {
@@ -44,19 +45,39 @@ public:
     // Now get the list of stationary beacons to be managed.
     Serial.print("\nRequesting server for the list of stationary beacons\n");
     HttpClient client = HttpClient(this->wifiClient, STATIONARY_BEACON_API_URL, STATIONARY_BEACON_API_PORT);
-    client.get((std::string(STATIONARY_BEACON_API_ENDPOINT) + std::string(FACILITY_NAME)).c_str());
-    int statusCode = client.responseStatusCode();
-    if (statusCode == 200)
+
+    if (CALLIBRATION_MODE)
     {
-      this->StationaryBeacons = client.responseBody();
+      Serial.print("Callibration mode is on:\n");
+      client.get((std::string(STATIONARY_BEACON_API_CALLIBRATION_ENDPOINT) + std::string(FACILITY_NAME) + "&lat=" + lat + "&lon=" + lon).c_str());
+      int statusCode = client.responseStatusCode();
+      if (statusCode == 200)
+      {
+        this->StationaryBeacons = client.responseBody();
+      }
+      else
+      {
+        Serial.print("\nBad server response. Trying again in 5 seconds\n");
+        delay(5000);
+        this->connect();
+      }
     }
     else
     {
-      Serial.print("\nBad server response. Trying again in 5 seconds\n");
-      delay(5000);
-      this->connect();
+      Serial.print("Broadcast mode is on:\n");
+      client.get((std::string(STATIONARY_BEACON_API_ENDPOINT) + std::string(FACILITY_NAME)).c_str());
+      int statusCode = client.responseStatusCode();
+      if (statusCode == 200)
+      {
+        this->StationaryBeacons = client.responseBody();
+      }
+      else
+      {
+        Serial.print("\nBad server response. Trying again in 5 seconds\n");
+        delay(5000);
+        this->connect();
+      }
     }
-
     // connect to MQTT server
     this->mqttClient.setServer(MQTT_SERVER, MQTT_PORT);
     this->startMQTT();

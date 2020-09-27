@@ -20,8 +20,11 @@
 // scanning.
 // the txpower can be unknown initially, if it is not in a valid range (-26,
 // -100),
+// It also stores the distance of a device from the advertising beacon
+// which is known during the callibration mode. This is the third value
+// in the map
 // then the scanning routing also parses the advertised data for that.
-std::map<std::string, float> m_knowns = {};
+std::map<std::string, std::vector<float>> m_knowns = {};
 // This holds the advertisedDevice. Note this is a global variable
 // because we want to minimize the memory allocation and reallocation
 // for this.
@@ -128,7 +131,7 @@ void BLEScan::handleGAPEvent(esp_gap_ble_cb_event_t event,
         newAdvertisedDevice->setRSSI(param->scan_rst.rssi);
 
         // Check if the txpower known for device is valid or not.
-        if (m_knowns[adStr] == 0.0)
+        if (m_knowns[adStr][0] == 0.0)
         {
           // Parse the manufacturing data
           int txPower = getTxPower((uint8_t *)param->scan_rst.ble_adv,
@@ -136,13 +139,13 @@ void BLEScan::handleGAPEvent(esp_gap_ble_cb_event_t event,
                                        param->scan_rst.scan_rsp_len);
           if (txPower != -1)
           {
-            m_knowns[adStr] = txPower;
+            m_knowns[adStr][0] = txPower;
             newAdvertisedDevice->setTXPower(txPower);
           }
         }
         else
         {
-          newAdvertisedDevice->setTXPower(m_knowns[adStr]);
+          newAdvertisedDevice->setTXPower(m_knowns[adStr][0]);
         }
         m_pAdvertisedDeviceCallbacks->onResult(*newAdvertisedDevice);
       }

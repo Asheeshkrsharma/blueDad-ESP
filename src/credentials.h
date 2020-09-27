@@ -26,7 +26,7 @@
 
 // BLE SCANNER OPTIONS
 #define BLE_SCAN_TIME_SECONDS 5 // How much time do we spend scanning once
-#define BLE_SCAN_EXPIRATION_TIME_SECONDS 2.5 // The beacons with data older than this will be ignored.
+#define BLE_SCAN_EXPIRATION_TIME_SECONDS 3 // The beacons with data older than this will be ignored.
 #define BLE_MAX_CONSEQUTIVE_READINGS 6 // How many consecutive readings to we take per beacon.
 
 // Used to get a list of beacon mac addresses
@@ -36,17 +36,19 @@
 #define STATIONARY_BEACON_API_URL "192.168.1.108"
 #define STATIONARY_BEACON_API_PORT 3000
 #define STATIONARY_BEACON_API_ENDPOINT "/api/v1/beacons?q="
+#define STATIONARY_BEACON_API_CALLIBRATION_ENDPOINT "/api/v1/beaconscalibration?q="
 
 // Callibration mode
 // Under this mode, we place the beacon at specific coordinates
 // these readings are then used to collect callibration data
 // for curvefitting/model training for RSSI-Distancing.
 #define CALLIBRATION_MODE 0
-#define lat "-2.579034003156417"
-#define lon "51.477120261718369"
+#define lat "-2.579000443038892"
+#define lon "51.477185201909677"
+
 // Status LED
-#define STATUS_LED 22 // Change this to the LED pin used to indicate that the node is scanning.
+#define STATUS_LED 21 // Change this to the LED pin used to indicate that the node is scanning.
 
 #undef MQTT_MAX_PACKET_SIZE
-#define MQTT_MAX_PACKET_SIZE 3000
+#define MQTT_MAX_PACKET_SIZE 5000
 #endif

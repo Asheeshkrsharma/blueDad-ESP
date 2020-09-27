@@ -11,7 +11,6 @@ struct deviceData
     double txPower;             // TxPower of the device
     unsigned long lastUpdateTS; // Keep track of the timestamp at which the device was found.
 };
-
 class Scanner : public BLEAdvertisedDeviceCallbacks
 {
 private:
@@ -31,9 +30,7 @@ private:
         Serial.print("\n");
         for (;;)
         {
-            digitalWrite(STATUS_LED, HIGH);
             BLEScanResults foundDevices = this->pBLEScan->start(BLE_SCAN_TIME_SECONDS, false);
-            digitalWrite(STATUS_LED, LOW);
             this->pBLEScan->stop();
             int numBeacons = 0;
             // Number of beacons which were updated recently.
@@ -47,7 +44,9 @@ private:
             if (numBeacons >= 4)
             {
                 this->parseData();
-            } else {
+            }
+            else
+            {
                 Serial.println("No new updates");
             }
         }
@@ -93,8 +92,6 @@ public:
     String beaconData;
     void setup(String stationaryBeacons)
     {
-        pinMode(STATUS_LED, OUTPUT);
-
         BLEDevice::init("");
         this->pBLEScan = BLEDevice::getScan();
         this->pBLEScan->setActiveScan(true);
@@ -105,14 +102,29 @@ public:
 
         // The key value pairs are used to filter certain addresses.
         // The value indicates the txPower of different beacons
-        DynamicJsonDocument doc(MQTT_MAX_PACKET_SIZE);
-        DeserializationError error = deserializeJson(doc, stationaryBeacons);
-        m_knowns = {};
-        if (!error)
-            for (auto beacon : doc.as<JsonArray>())
-            {
-                m_knowns.insert(std::pair<std::string, float>(beacon.as<char *>(), 0.0));
-            }
+        if (CALLIBRATION_MODE)
+        {
+            DynamicJsonDocument doc(MQTT_MAX_PACKET_SIZE);
+            DeserializationError error = deserializeJson(doc, stationaryBeacons);
+            m_knowns = {};
+            if (!error)
+                for (auto beacon : doc.as<JsonArray>())
+                {
+                    m_knowns.insert(std::pair<std::string, std ::vector<float>>(beacon[0].as<char *>(), {0.0, beacon[1]}));
+                }
+        }
+        else
+        {
+            DynamicJsonDocument doc(MQTT_MAX_PACKET_SIZE);
+            DeserializationError error = deserializeJson(doc, stationaryBeacons);
+            m_knowns = {};
+            if (!error)
+                for (auto beacon : doc.as<JsonArray>())
+                {
+                    m_knowns.insert(std::pair<std::string, std ::vector<float>>(beacon.as<char *>(), {0.0, 0.0}));
+                }
+        }
+
         // else ? Reboot may be?
         xTaskCreatePinnedToCore(
             this->startTaskImpl, /* Task function. */
@@ -123,9 +135,24 @@ public:
             &this->scannerTask,  /* Task handle to keep track of created task */
             0);                  /* pin task to core 1 */
 
-        this->beaconData = "";   // We dont have any data initially.
+        this->beaconData = ""; // We dont have any data initially.
         this->kalman = new Kalman_Filter_Distance(0.008);
     }
+
+    // This method is used to calculate the ideal rssi
+    // Given that the distance to the beacon is know.
+    // This is only used duing the callibration process
+    // To smoothen the readings and calculating the
+    // measurment noise for the Kalman filter.
+    double getIdealRSSI(double txPower, double distance)
+    {
+        /*
+         * RSSI = TxPower - 10 * n * lg(d)
+         * n = 2 (in free space)
+        */
+        return txPower - (10 * 2 * log10(distance));
+    }
+
     void parseData()
     {
         DynamicJsonDocument result(MQTT_MAX_PACKET_SIZE);
@@ -149,14 +176,40 @@ public:
                 double average = std::accumulate(device.second.rssi.begin(),
                                                  device.second.rssi.end(), 0.0) /
                                  device.second.rssi.size();
-                // Calculate the variance
-                std::vector<double> diff(device.second.rssi.size());
-                std::transform(device.second.rssi.begin(),
-                               device.second.rssi.end(), diff.begin(),
-                               [average](double x) { return x - average; });
-                double variance = std::sqrt(
-                    std::inner_product(diff.begin(), diff.end(), diff.begin(), 0.0) /
-                    device.second.rssi.size());
+
+                double variance = 0.0;
+                // During callibration, we calculate the measurement noise
+                // using its deviation from the ideal rssi at the known
+                // distance.
+                if (CALLIBRATION_MODE)
+                {
+                    // During the callibration, we know the distance between
+                    // the beacon and this device. So we calculte the variance
+                    // in the recived rssi based on what the rssi is supposed
+                    // to be in an ideal world.
+                    // Then we use the variance to adjust the measurement noise
+                    // in the kalman filter.
+                    auto idealRSSI = getIdealRSSI(device.second.txPower, m_knowns[device.first][1]);
+                    // Calculate the variance
+                    std::vector<double> diff(device.second.rssi.size());
+                    std::transform(device.second.rssi.begin(),
+                                   device.second.rssi.end(), diff.begin(),
+                                   [idealRSSI](double x) { return x - idealRSSI; });
+                    variance = std::sqrt(
+                        std::inner_product(diff.begin(), diff.end(), diff.begin(), 0.0) /
+                        device.second.rssi.size());
+                }
+                else
+                {
+                    // Calculate the normal variance
+                    std::vector<double> diff(device.second.rssi.size());
+                    std::transform(device.second.rssi.begin(),
+                                   device.second.rssi.end(), diff.begin(),
+                                   [average](double x) { return x - average; });
+                    variance = std::sqrt(
+                        std::inner_product(diff.begin(), diff.end(), diff.begin(), 0.0) /
+                        device.second.rssi.size());
+                }
 
                 // We push the filtered average 6 - numVals times.
                 if (numVals < BLE_MAX_CONSEQUTIVE_READINGS)
@@ -172,7 +225,11 @@ public:
 
                 // Add the filtered rssi data to the json object.
                 this->kalman->reset();
-                this->kalman->setMeasurementNoise(variance);
+                // Measurement Noise: Represents (electronic, random) noise characteristics of the sensor.
+                // It is calculated from the sensor accuracy which is represented using "standard deviation"
+                // of measured value from true values (sigma) during the calibration.
+                // sigma_sq = sigma^2;
+                this->kalman->setMeasurementNoise(variance * variance);
                 for (auto &rssi : device.second.rssi)
                 {
                     rssi = (double)this->kalman->filter(rssi);
@@ -198,7 +255,8 @@ public:
         result.clear();
     }
 
-    void setPubCallback(void (*callback)(String payload)){
+    void setPubCallback(void (*callback)(String payload))
+    {
         this->publish = callback;
     }
 };

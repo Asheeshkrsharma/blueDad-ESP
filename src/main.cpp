@@ -8,12 +8,16 @@ Scanner scn;
 
 // PUBLISH callback
 void sendLocationUpdate(String payload){
+  digitalWrite(STATUS_LED, HIGH);
   wmb.sendLocationUpdate(payload);
   Serial.print("...");
+  digitalWrite(STATUS_LED, LOW);
 }
 
 void setup()
 {
+  pinMode(STATUS_LED, OUTPUT);
+  
   Serial.begin(115200);
   // Connects to a hotspot and estabilshed MQTT
   wmb.connect();
